@@ -26,11 +26,11 @@ from graph.schema import get_driver, get_graph_stats
 # ─── Config page ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Scientific Graph Explorer",
-    page_icon="",
+    page_icon="🔬",
     layout="wide"
 )
 
-st.title("Scientific Graph Explorer")
+st.title("🔬 Scientific Graph Explorer")
 st.markdown("Analyse des publications scientifiques via Neo4j")
 st.divider()
 
@@ -42,13 +42,13 @@ page = st.sidebar.selectbox("Choisir une vue", [
     "Topics & Tendances",
     "Recherche Auteur",
     "Recherche Topic",
+    "Communautes de Chercheurs",  # ← PAGE 6 (Phase 11)
 ])
 
 # ─── PAGE 1 : Vue Generale ───────────────────────────────────────────────────
 if page == "Vue Generale":
     st.header("Vue Generale")
 
-    # stats reelles depuis Neo4j
     driver = get_driver()
     with driver.session() as session:
         stats = get_graph_stats(session)
@@ -132,10 +132,7 @@ elif page == "Reseau de Collaborations":
     else:
         G = nx.Graph()
         for r in collabs:
-            G.add_edge(
-                r["author1"], r["author2"],
-                weight=r["collaborations"]
-            )
+            G.add_edge(r["author1"], r["author2"], weight=r["collaborations"])
 
         st.info(f"Noeuds : {G.number_of_nodes()} auteurs | Aretes : {G.number_of_edges()} collaborations")
 
@@ -335,3 +332,163 @@ elif page == "Recherche Topic":
                 st.plotly_chart(fig2, use_container_width=True)
         else:
             st.warning(f"Aucun paper trouve pour '{topic_input}'")
+
+# ─── PAGE 6 : Communautes de Chercheurs ──────────────────────────────────────
+elif page == "Communautes de Chercheurs":
+    st.header("🧩 Communautes de Chercheurs")
+    st.markdown("Detection de communautes via l'algorithme de **Louvain** sur le reseau de collaborations.")
+
+    # verifier si les communautes sont deja calculees
+    from bonus.community import get_communities_from_neo4j, get_author_community
+
+    communities_data = get_communities_from_neo4j(limit=50)
+
+    if not communities_data:
+        st.warning("Aucune communaute detectee dans Neo4j.")
+        st.info("Lancer d'abord : `python bonus/community.py`")
+        if st.button("Lancer la detection maintenant"):
+            with st.spinner("Detection en cours (peut prendre quelques minutes)..."):
+                from bonus.community import run_community_detection
+                result = run_community_detection()
+                if result:
+                    st.success(f"{result['n_communities']} communautes detectees !")
+                    st.rerun()
+                else:
+                    st.error("Echec de la detection. Verifier les logs.")
+    else:
+        # ── Stats globales
+        total_authors = sum(c["size"] for c in communities_data)
+        n_comm        = len(communities_data)
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Communautes detectees", n_comm)
+        col2.metric("Auteurs assignes",      total_authors)
+        col3.metric("Taille moyenne",        f"{total_authors / n_comm:.1f}" if n_comm else "—")
+
+        st.divider()
+
+        # ── Distribution des tailles
+        col_a, col_b = st.columns(2)
+
+        with col_a:
+            st.subheader("Taille des communautes")
+            df_comm = pd.DataFrame(communities_data)
+            df_comm["community_label"] = df_comm["community_id"].apply(lambda x: f"Comm #{x}")
+
+            fig = px.bar(
+                df_comm.head(20),
+                x="size", y="community_label",
+                orientation="h",
+                color="size",
+                color_continuous_scale="Viridis",
+                labels={"size": "Nombre de membres", "community_label": "Communaute"}
+            )
+            fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False, height=500)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with col_b:
+            st.subheader("Repartition des membres")
+            fig2 = px.pie(
+                df_comm.head(15),
+                names="community_label",
+                values="size",
+                color_discrete_sequence=px.colors.qualitative.Pastel
+            )
+            fig2.update_traces(textposition="inside", textinfo="percent+label")
+            st.plotly_chart(fig2, use_container_width=True)
+
+        # ── Top membres par communaute
+        st.subheader("Top membres par communaute")
+        for comm in communities_data[:10]:
+            members_preview = comm.get("top_members", [])
+            with st.expander(f"Communaute #{comm['community_id']} — {comm['size']} membres"):
+                if members_preview:
+                    st.write(", ".join(members_preview))
+                else:
+                    st.write("Aucun membre disponible")
+
+        # ── Visualisation graphe colore par communaute
+        st.subheader("Reseau colore par communaute")
+        n_collab = st.slider("Collaborations a afficher", 30, 150, 60)
+
+        driver = get_driver()
+        query = """
+        MATCH (a1:Author)-[r:COLLABORATED_WITH]-(a2:Author)
+        WHERE id(a1) < id(a2)
+          AND a1.community_id IS NOT NULL
+          AND a2.community_id IS NOT NULL
+        RETURN a1.name AS author1, a1.community_id AS comm1,
+               a2.name AS author2, a2.community_id AS comm2,
+               r.count AS weight
+        ORDER BY r.count DESC
+        LIMIT $limit
+        """
+        with driver.session() as session:
+            rows = [dict(r) for r in session.run(query, limit=n_collab)]
+        driver.close()
+
+        if rows:
+            # palette de couleurs par communaute
+            comm_ids = list(set([r["comm1"] for r in rows] + [r["comm2"] for r in rows]))
+            palette  = px.colors.qualitative.Plotly + px.colors.qualitative.Safe
+            color_map = {cid: palette[i % len(palette)] for i, cid in enumerate(sorted(comm_ids))}
+
+            G = nx.Graph()
+            node_comm = {}
+            for r in rows:
+                G.add_edge(r["author1"], r["author2"], weight=r["weight"])
+                node_comm[r["author1"]] = r["comm1"]
+                node_comm[r["author2"]] = r["comm2"]
+
+            net = Network(height="600px", width="100%", bgcolor="#0e1117", font_color="white")
+            net.from_nx(G)
+
+            for node in net.nodes:
+                nid    = node["id"]
+                comm   = node_comm.get(nid, 0)
+                degree = G.degree(nid)
+                node["size"]  = 10 + degree * 2
+                node["color"] = color_map.get(comm, "#888888")
+                node["title"] = f"{nid}\nCommunaute #{comm}"
+
+            for edge in net.edges:
+                edge["color"] = "#333333"
+                edge["width"] = max(1, edge.get("weight", 1) * 0.5)
+
+            net.set_options("""
+            {
+              "physics": {
+                "forceAtlas2Based": {
+                  "gravitationalConstant": -60,
+                  "centralGravity": 0.01,
+                  "springLength": 120
+                },
+                "solver": "forceAtlas2Based"
+              }
+            }
+            """)
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
+                net.save_graph(f.name)
+                html_content = open(f.name, "r", encoding="utf-8").read()
+
+            st.components.v1.html(html_content, height=620, scrolling=True)
+            st.caption("Chaque couleur represente une communaute distincte detectee par Louvain.")
+        else:
+            st.info("Pas assez de donnees pour la visualisation. "
+                    "Verifier que community_id est bien stocke sur les auteurs.")
+
+        # ── Recherche par auteur
+        st.divider()
+        st.subheader("Trouver la communaute d'un auteur")
+        author_search = st.text_input("Nom de l'auteur", placeholder="ex: LeCun")
+
+        if author_search:
+            result = get_author_community(author_search)
+            if result:
+                st.success(f"L'auteur appartient a la **Communaute #{result['community_id']}** "
+                           f"({result['community_size']} membres)")
+                st.write("Membres de la communaute (extrait) :")
+                st.write(", ".join(result["members"]))
+            else:
+                st.warning("Auteur non trouve ou pas encore assigne a une communaute.")
