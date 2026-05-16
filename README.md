@@ -233,13 +233,3 @@ python -m pytest tests/test_collectors.py -v   # necessite connexion internet
 - `python-louvain` est requis pour la detection de communautes (fallback Girvan-Newman sinon)
 
 ---
-
-## Problemes connus et solutions
-
-| Probleme | Solution |
-|---------|----------|
-| `neo4j.exceptions.ServiceUnavailable` | Utiliser `neo4j+ssc://` (pas `neo4j+s://`) |
-| `PYSPARK_PYTHON` non trouve | Ajouter `os.environ["PYSPARK_PYTHON"] = sys.executable` en premier |
-| Kafka `NoBrokersAvailable` | Demarrer Kafka avant le producer/consumer |
-| `kafka-python` incompatible Kafka 4.x | Utiliser `kafka-python-ng` a la place |
-| Push Git echoue (fichier trop grand) | `git filter-repo --path <fichier> --invert-paths` |
