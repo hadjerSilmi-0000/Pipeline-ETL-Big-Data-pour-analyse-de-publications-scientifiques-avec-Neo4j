@@ -2,10 +2,9 @@ import os
 import sys
 import streamlit as st
 import plotly.express as px
+import plotly.graph_objects as go
 import pandas as pd
-import tempfile
 import networkx as nx
-from pyvis.network import Network
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -19,419 +18,628 @@ from graph.queries import (
     get_author_collaborators,
     get_author_papers,
     get_category_distribution,
-    get_papers_by_topic
+    get_papers_by_topic,
 )
 from graph.schema import get_driver, get_graph_stats
 
-# ─── Config page ─────────────────────────────────────────────────────────────
+# ─── Page config ─────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Scientific Graph Explorer",
-    page_icon="🔬",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
 
-st.title("🔬 Scientific Graph Explorer")
-st.markdown("Analyse des publications scientifiques via Neo4j")
-st.divider()
+# ─── CSS ─────────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@400;500;600&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'DM Sans', sans-serif;
+    background-color: #FFFFFF;
+    color: #1A0030;
+}
+
+/* Sidebar */
+section[data-testid="stSidebar"] {
+    background: #000000 !important;
+    border-right: 1.5px solid #2A2A2A;
+}
+
+section[data-testid="stSidebar"] * {
+    color: #FFFFFF !important;
+}
+
+section[data-testid="stSidebar"] .stSelectbox > div > div {
+    background: #111111 !important;
+    border: 1px solid #333333 !important;
+    color: #FFFFFF !important;
+}
+
+/* Selectbox dropdown */
+div[data-baseweb="popover"] {
+    background-color: #111111 !important;
+}
+
+div[data-baseweb="popover"] * {
+    color: #FFFFFF !important;
+}
+/* Header */
+.sg-header {
+    background: linear-gradient(135deg, #9112BC 0%, #AE75DA 100%);
+    padding: 28px 36px;
+    border-radius: 12px;
+    margin-bottom: 28px;
+}
+.sg-header h1 {
+    font-family: 'DM Serif Display', serif;
+    color: #FFFCB8;
+    font-size: 2rem;
+    margin: 0;
+    letter-spacing: -0.5px;
+}
+
+/* Metrics */
+div[data-testid="stMetric"] {
+    background: #FFFFFF;
+    border: 2px solid #AE75DA;
+    border-radius: 10px;
+    padding: 16px 20px;
+}
+div[data-testid="stMetric"] label {
+    font-size: 0.75rem !important;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: #9112BC !important;
+    font-weight: 600 !important;
+}
+div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+    font-family: 'DM Serif Display', serif;
+    color: #9112BC !important;
+    font-size: 2rem !important;
+}
+
+/* Section titles */
+.section-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 1.15rem;
+    color: #9112BC;
+    margin: 20px 0 10px 0;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #AE75DA;
+    display: inline-block;
+}
+
+/* Paper cards */
+.paper-card {
+    background: #FFFFFF;
+    border: 1.5px solid #AE75DA;
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 10px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+}
+.paper-card:hover {
+    border-color: #9112BC;
+    box-shadow: 0 4px 12px rgba(145,18,188,0.12);
+}
+.paper-title {
+    font-family: 'DM Serif Display', serif;
+    font-size: 0.95rem;
+    color: #9112BC;
+    margin-bottom: 6px;
+}
+.paper-badge {
+    display: inline-block;
+    background: #FFFFFF;
+    color: #9112BC;
+    border: 1px solid #AE75DA;
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 12px;
+    margin-right: 5px;
+}
+
+/* Divider */
+.sg-divider { border: none; border-top: 1.5px solid #AE75DA; margin: 18px 0; }
+
+/* Author pill */
+.author-pill {
+    display: inline-block;
+    background: #FFACAC;
+    color: #1A0030;
+    font-size: 0.78rem;
+    font-weight: 600;
+    padding: 3px 10px;
+    border-radius: 16px;
+    margin: 3px;
+}
+
+/* Charts container */
+.stPlotlyChart {
+    border: 1.5px solid #AE75DA;
+    border-radius: 10px;
+    overflow: hidden;
+    background: #FFFFFF;
+}
+
+/* DataFrame */
+.stDataFrame { border: 1.5px solid #AE75DA; border-radius: 8px; }
+
+/* Tabs */
+button[data-baseweb="tab"] {
+    font-family: 'DM Sans', sans-serif;
+    font-weight: 600;
+    color: #AE75DA !important;
+}
+button[data-baseweb="tab"][aria-selected="true"] {
+    color: #9112BC !important;
+    border-bottom-color: #9112BC !important;
+}
+
+/* Slider */
+div[data-testid="stSlider"] * { color: #9112BC !important; }
+div[data-testid="stSlider"] [data-testid="stThumbValue"] {
+    background: #000000 !important; color: #FFFCB8 !important;
+}
+
+/* Expander */
+details { border: 1.5px solid #AE75DA !important; border-radius: 8px !important; }
+summary { color: #9112BC !important; font-weight: 600 !important; }
+
+/* Block container */
+.block-container { padding-top: 1rem !important; }
+
+/* Warning / info boxes */
+div[data-testid="stAlert"] { border-radius: 8px !important; }
+</style>
+""", unsafe_allow_html=True)
+
+# ─── Plotly theme ─────────────────────────────────────────────────────────────
+PL = dict(
+    font_family="DM Sans",
+    paper_bgcolor="#FFFFFF",
+    plot_bgcolor="#FFFFFF",
+    margin=dict(l=12, r=12, t=28, b=12),
+    coloraxis_showscale=False,
+)
+PURPLES = ["#F3E6FA", "#D9AEF0", "#AE75DA", "#9112BC", "#5A0078"]
+ACCENT  = "#FFACAC"
+
+# ─── Header ──────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="sg-header">
+  <h1>Scientific Graph Explorer</h1>
+</div>
+""", unsafe_allow_html=True)
 
 # ─── Sidebar ─────────────────────────────────────────────────────────────────
-st.sidebar.title("Navigation")
-page = st.sidebar.selectbox("Choisir une vue", [
-    "Vue Generale",
-    "Reseau de Collaborations",
-    "Topics & Tendances",
-    "Recherche Auteur",
-    "Recherche Topic",
-    "Communautes de Chercheurs",  # ← PAGE 6 (Phase 11)
-])
+with st.sidebar:
+    st.markdown("### Navigation")
+    page = st.selectbox("Page", [
+        "Overview",
+        "Collaboration Network",
+        "Topics & Trends",
+        "Author Search",
+        "Topic Search",
+        "Research Communities",
+    ], label_visibility="collapsed")
 
-# ─── PAGE 1 : Vue Generale ───────────────────────────────────────────────────
-if page == "Vue Generale":
-    st.header("Vue Generale")
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 1 — OVERVIEW
+# ══════════════════════════════════════════════════════════════════════════════
+if page == "Overview":
 
     driver = get_driver()
     with driver.session() as session:
         stats = get_graph_stats(session)
     driver.close()
 
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Papers",         stats["papers"])
-    col2.metric("Auteurs",        stats["authors"])
-    col3.metric("Topics",         stats["topics"])
-    col4.metric("Collaborations", stats["collaborated"])
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Papers",         f"{stats['papers']:,}")
+    c2.metric("Authors",        f"{stats['authors']:,}")
+    c3.metric("Topics",         f"{stats['topics']:,}")
+    c4.metric("Collaborations", f"{stats['collaborated']:,}")
+    c5.metric("Citations",      f"{stats['cites']:,}")
 
-    st.divider()
+    st.markdown("<hr class='sg-divider'>", unsafe_allow_html=True)
+
+    col_l, col_r = st.columns(2)
+
+    with col_l:
+        st.markdown("<div class='section-title'>Publications by Year</div>", unsafe_allow_html=True)
+        df_year = pd.DataFrame(get_papers_by_year()).head(15)
+        if not df_year.empty:
+            fig = px.bar(df_year, x="year", y="papers",
+                         color="papers", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, xaxis_title="Year", yaxis_title="Papers", height=300)
+            fig.update_traces(marker_line_width=0)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with col_r:
+        st.markdown("<div class='section-title'>arXiv Categories</div>", unsafe_allow_html=True)
+        df_cat = pd.DataFrame(get_category_distribution()[:10])
+        if not df_cat.empty:
+            fig = px.pie(df_cat, names="category", values="papers",
+                         color_discrete_sequence=PURPLES + [ACCENT])
+            fig.update_layout(**PL, height=300)
+            fig.update_traces(textposition="inside", textinfo="percent+label", textfont_size=10)
+            st.plotly_chart(fig, use_container_width=True)
 
     col_a, col_b = st.columns(2)
 
     with col_a:
-        st.subheader("Publications par annee")
-        by_year = get_papers_by_year()
-        df_year = pd.DataFrame(by_year)
-        if not df_year.empty:
-            fig = px.bar(
-                df_year.head(15),
-                x="year", y="papers",
-                color="papers",
-                color_continuous_scale="Blues",
-                labels={"year": "Annee", "papers": "Nombre de papers"}
-            )
-            fig.update_layout(showlegend=False)
+        st.markdown("<div class='section-title'>Most Prolific Authors</div>", unsafe_allow_html=True)
+        df_auth = pd.DataFrame(get_most_prolific_authors(12))
+        if not df_auth.empty:
+            fig = px.bar(df_auth, x="papers", y="author", orientation="h",
+                         color="papers", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                              xaxis_title="Papers", yaxis_title="", height=380)
+            fig.update_traces(marker_line_width=0)
             st.plotly_chart(fig, use_container_width=True)
 
     with col_b:
-        st.subheader("Top 10 Categories arXiv")
-        cats = get_category_distribution()
-        df_cat = pd.DataFrame(cats[:10])
-        if not df_cat.empty:
-            fig = px.pie(
-                df_cat,
-                names="category",
-                values="papers",
-                color_discrete_sequence=px.colors.qualitative.Set3
-            )
+        st.markdown("<div class='section-title'>Top Topics</div>", unsafe_allow_html=True)
+        df_top = pd.DataFrame(get_top_topics(12))
+        if not df_top.empty:
+            fig = px.bar(df_top, x="papers", y="topic", orientation="h",
+                         color="papers", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                              xaxis_title="Papers", yaxis_title="", height=380)
+            fig.update_traces(marker_line_width=0)
             st.plotly_chart(fig, use_container_width=True)
 
-    st.subheader("Top 10 Auteurs les plus prolifiques")
-    df_authors = pd.DataFrame(get_most_prolific_authors(10))
-    if not df_authors.empty:
-        fig = px.bar(
-            df_authors,
-            x="papers", y="author",
-            orientation="h",
-            color="papers",
-            color_continuous_scale="Viridis",
-            labels={"papers": "Nombre de papers", "author": "Auteur"}
-        )
-        fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
+    st.markdown("<div class='section-title'>Most Cited Papers</div>", unsafe_allow_html=True)
+    for r in get_most_cited_papers(10):
+        st.markdown(f"""
+        <div class="paper-card">
+            <div class="paper-title">{r['title'][:120]}</div>
+            <div>
+                <span class="paper-badge">{r.get('year','—')}</span>
+                <span class="paper-badge">{r['citations']:,} citations</span>
+                <span class="paper-badge">arXiv:{r['arxiv_id']}</span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
 
-    st.subheader("Top 10 Topics globaux")
-    df_topics = pd.DataFrame(get_top_topics(10))
-    if not df_topics.empty:
-        fig = px.bar(
-            df_topics,
-            x="papers", y="topic",
-            orientation="h",
-            color="papers",
-            color_continuous_scale="Turbo",
-            labels={"papers": "Nombre de papers", "topic": "Topic"}
-        )
-        fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
-        st.plotly_chart(fig, use_container_width=True)
 
-# ─── PAGE 2 : Reseau de Collaborations ───────────────────────────────────────
-elif page == "Reseau de Collaborations":
-    st.header("Reseau de Collaborations")
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 2 — COLLABORATION NETWORK
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Collaboration Network":
+    st.markdown("<div class='section-title'>Author Collaboration Network</div>", unsafe_allow_html=True)
 
-    limit = st.slider("Nombre de collaborations a afficher", 20, 200, 50)
+    limit   = st.slider("Number of collaborations to display", 20, 200, 60)
     collabs = get_collaboration_network(limit=limit)
 
     if not collabs:
-        st.warning("Aucune collaboration trouvee.")
+        st.warning("No collaborations found.")
     else:
         G = nx.Graph()
         for r in collabs:
             G.add_edge(r["author1"], r["author2"], weight=r["collaborations"])
 
-        st.info(f"Noeuds : {G.number_of_nodes()} auteurs | Aretes : {G.number_of_edges()} collaborations")
+        col_i, col_ii = st.columns([2, 1])
 
-        net = Network(height="600px", width="100%", bgcolor="#0e1117", font_color="white")
-        net.from_nx(G)
+        with col_i:
+            pos = nx.spring_layout(G, seed=42, k=1.2)
+            edge_x, edge_y = [], []
+            for u, v in G.edges():
+                x0, y0 = pos[u]; x1, y1 = pos[v]
+                edge_x += [x0, x1, None]; edge_y += [y0, y1, None]
 
-        for node in net.nodes:
-            degree = G.degree(node["id"])
-            node["size"]  = 10 + degree * 3
-            node["title"] = f"{node['id']} ({degree} collaborateurs)"
-            node["color"] = "#4FC3F7"
+            degrees = [G.degree(n) for n in G.nodes()]
+            labels  = list(G.nodes())
 
-        for edge in net.edges:
-            edge["width"] = edge.get("weight", 1)
-            edge["color"] = "#555555"
-
-        net.set_options("""
-        {
-          "physics": {
-            "forceAtlas2Based": {
-              "gravitationalConstant": -50,
-              "centralGravity": 0.01,
-              "springLength": 100
-            },
-            "solver": "forceAtlas2Based"
-          }
-        }
-        """)
-
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
-            net.save_graph(f.name)
-            html_content = open(f.name, "r", encoding="utf-8").read()
-
-        st.components.v1.html(html_content, height=620, scrolling=True)
-
-        st.subheader("Top collaborations")
-        df = pd.DataFrame(collabs[:20])
-        st.dataframe(df, use_container_width=True)
-
-# ─── PAGE 3 : Topics & Tendances ─────────────────────────────────────────────
-elif page == "Topics & Tendances":
-    st.header("Topics & Tendances")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader("Top 20 Topics globaux")
-        topics = get_top_topics(limit=20)
-        df = pd.DataFrame(topics)
-        if not df.empty:
-            fig = px.bar(
-                df, x="papers", y="topic",
-                orientation="h",
-                color="papers",
-                color_continuous_scale="Turbo",
-                labels={"papers": "Nombre de papers", "topic": "Topic"}
-            )
-            fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False, height=600)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
+                                     line=dict(width=0.7, color="#D9AEF0"),
+                                     hoverinfo="none"))
+            fig.add_trace(go.Scatter(
+                x=[pos[n][0] for n in G.nodes()],
+                y=[pos[n][1] for n in G.nodes()],
+                mode="markers+text",
+                marker=dict(size=[8 + d * 1.5 for d in degrees],
+                            color=degrees,
+                            colorscale=PURPLES,
+                            line=dict(width=1, color="#FFFCB8")),
+                text=[l if G.degree(l) > 3 else "" for l in labels],
+                textposition="top center",
+                textfont=dict(size=8, color="#1A0030"),
+                hovertext=[f"{l} — {G.degree(l)} collaborators" for l in labels],
+                hoverinfo="text",
+            ))
+            fig.update_layout(**PL, height=460, showlegend=False,
+                              xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                              yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
             st.plotly_chart(fig, use_container_width=True)
 
-    with col2:
-        st.subheader("Topics par annee")
-        years = list(range(2026, 2009, -1))
-        selected_year = st.selectbox("Selectionner une annee", years)
-        topics_year = get_topics_by_year(selected_year, limit=15)
-        df_y = pd.DataFrame(topics_year)
+        with col_ii:
+            st.markdown("<div class='section-title'>Top Pairs</div>", unsafe_allow_html=True)
+            for _, row in pd.DataFrame(collabs[:15]).iterrows():
+                st.markdown(f"""
+                <div class="paper-card" style="padding:10px 14px;">
+                  <div style="font-size:0.82rem;font-weight:600;color:#9112BC">{row['author1'][:30]}</div>
+                  <div style="font-size:0.75rem;color:#AE75DA;margin:2px 0">{row['collaborations']} shared papers</div>
+                  <div style="font-size:0.82rem;font-weight:600;color:#9112BC">{row['author2'][:30]}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.markdown("<hr class='sg-divider'>", unsafe_allow_html=True)
+        cs1, cs2, cs3 = st.columns(3)
+        cs1.metric("Authors", G.number_of_nodes())
+        cs2.metric("Edges",   G.number_of_edges())
+        cs3.metric("Components", len(list(nx.connected_components(G))))
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 3 — TOPICS & TRENDS
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Topics & Trends":
+    st.markdown("<div class='section-title'>Topics & Research Trends</div>", unsafe_allow_html=True)
+
+    tab1, tab2, tab3 = st.tabs(["Global Distribution", "By Year", "Evolution"])
+
+    with tab1:
+        df = pd.DataFrame(get_top_topics(limit=25))
+        if not df.empty:
+            fig = px.bar(df, x="papers", y="topic", orientation="h",
+                         color="papers", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                              xaxis_title="Papers", yaxis_title="", height=600)
+            fig.update_traces(marker_line_width=0)
+            st.plotly_chart(fig, use_container_width=True)
+
+    with tab2:
+        selected_year = st.selectbox("Year", list(range(2026, 2009, -1)))
+        df_y = pd.DataFrame(get_topics_by_year(selected_year, limit=20))
         if not df_y.empty:
-            fig = px.bar(
-                df_y, x="papers", y="topic",
-                orientation="h",
-                color="papers",
-                color_continuous_scale="Plasma",
-                labels={"papers": "Nombre de papers", "topic": "Topic"}
-            )
-            fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False, height=500)
+            fig = px.bar(df_y, x="papers", y="topic", orientation="h",
+                         color="papers", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                              xaxis_title="Papers", yaxis_title="", height=520)
+            fig.update_traces(marker_line_width=0)
             st.plotly_chart(fig, use_container_width=True)
         else:
-            st.info(f"Pas de topics pour {selected_year}")
+            st.info(f"No topics for {selected_year}.")
 
-    st.subheader("Evolution des topics dans le temps")
-    top5 = [r["topic"] for r in get_top_topics(5)]
-    by_year = get_papers_by_year()
-    years_list = [r["year"] for r in by_year if r["year"]]
+    with tab3:
+        top5 = [r["topic"] for r in get_top_topics(5)]
+        years_list = sorted([r["year"] for r in get_papers_by_year() if r["year"]])
+        trend_data = []
+        for y in years_list:
+            for t in get_topics_by_year(y, limit=50):
+                if t["topic"] in top5:
+                    trend_data.append({"Year": y, "Topic": t["topic"], "Papers": t["papers"]})
+        if trend_data:
+            fig = px.line(pd.DataFrame(trend_data), x="Year", y="Papers", color="Topic",
+                          markers=True, color_discrete_sequence=PURPLES + [ACCENT])
+            fig.update_layout(**PL, height=400)
+            st.plotly_chart(fig, use_container_width=True)
 
-    trend_data = []
-    for y in sorted(years_list):
-        topics_y = get_topics_by_year(y, limit=50)
-        for t in topics_y:
-            if t["topic"] in top5:
-                trend_data.append({"year": y, "topic": t["topic"], "papers": t["papers"]})
 
-    if trend_data:
-        df_trend = pd.DataFrame(trend_data)
-        fig = px.line(
-            df_trend, x="year", y="papers",
-            color="topic",
-            markers=True,
-            labels={"year": "Annee", "papers": "Nombre de papers", "topic": "Topic"}
-        )
-        st.plotly_chart(fig, use_container_width=True)
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 4 — AUTHOR SEARCH
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Author Search":
+    st.markdown("<div class='section-title'>Author Profile</div>", unsafe_allow_html=True)
 
-# ─── PAGE 4 : Recherche Auteur ────────────────────────────────────────────────
-elif page == "Recherche Auteur":
-    st.header("Recherche par Auteur")
-
-    author_input = st.text_input("Nom de l'auteur", placeholder="ex: Bengio")
+    author_input = st.text_input("Author name", placeholder="e.g. Bengio, LeCun, Vaswani",
+                                  label_visibility="collapsed")
 
     if author_input:
-        col1, col2 = st.columns(2)
+        col1, col2 = st.columns([3, 2])
 
         with col1:
-            st.subheader("Papers publies")
+            st.markdown("**Published Papers**")
             papers = get_author_papers(author_input)
             if papers:
-                df = pd.DataFrame(papers)
-                st.dataframe(df, use_container_width=True)
-                st.info(f"{len(papers)} papers trouves")
+                for p in papers[:15]:
+                    st.markdown(f"""
+                    <div class="paper-card">
+                        <div class="paper-title">{p['title'][:110]}</div>
+                        <div>
+                            <span class="paper-badge">{p.get('year','—')}</span>
+                            <span class="paper-badge">{p.get('citations',0) or 0:,} citations</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                st.caption(f"{len(papers)} papers found")
             else:
-                st.warning("Aucun paper trouve pour cet auteur.")
+                st.warning("No papers found.")
 
         with col2:
-            st.subheader("Collaborateurs")
+            st.markdown("**Top Collaborators**")
             collabs = get_author_collaborators(author_input)
             if collabs:
-                df_c = pd.DataFrame(collabs)
-                fig = px.bar(
-                    df_c.head(15),
-                    x="shared_papers", y="collaborator",
-                    orientation="h",
-                    color="shared_papers",
-                    color_continuous_scale="Blues",
-                    labels={"shared_papers": "Papers communs", "collaborator": "Collaborateur"}
-                )
-                fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False)
+                df_c = pd.DataFrame(collabs[:15])
+                fig = px.bar(df_c, x="shared_papers", y="collaborator", orientation="h",
+                             color="shared_papers", color_continuous_scale=PURPLES)
+                fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                                  xaxis_title="Shared papers", yaxis_title="", height=380)
+                fig.update_traces(marker_line_width=0)
                 st.plotly_chart(fig, use_container_width=True)
+
+                st.markdown("**Network**")
+                G = nx.Graph()
+                G.add_node(author_input)
+                for c in collabs[:20]:
+                    G.add_edge(author_input, c["collaborator"], weight=c["shared_papers"])
+
+                pos = nx.spring_layout(G, seed=42)
+                edge_x, edge_y = [], []
+                for u, v in G.edges():
+                    x0, y0 = pos[u]; x1, y1 = pos[v]
+                    edge_x += [x0, x1, None]; edge_y += [y0, y1, None]
+
+                fig2 = go.Figure()
+                fig2.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
+                                          line=dict(width=1, color="#D9AEF0"),
+                                          hoverinfo="none"))
+                fig2.add_trace(go.Scatter(
+                    x=[pos[n][0] for n in G.nodes()],
+                    y=[pos[n][1] for n in G.nodes()],
+                    mode="markers+text",
+                    marker=dict(
+                        size=[20 if n == author_input else 11 for n in G.nodes()],
+                        color=[ACCENT if n == author_input else "#9112BC" for n in G.nodes()],
+                        line=dict(width=1, color="#FFFCB8")
+                    ),
+                    text=[n[:20] for n in G.nodes()],
+                    textposition="top center",
+                    textfont=dict(size=7),
+                    hoverinfo="text",
+                ))
+                fig2.update_layout(**PL, height=270, showlegend=False,
+                                   xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                                   yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+                st.plotly_chart(fig2, use_container_width=True)
             else:
-                st.warning("Aucun collaborateur trouve.")
+                st.warning("No collaborators found.")
 
-        st.subheader("Reseau de collaborations")
-        if collabs:
-            G = nx.Graph()
-            G.add_node(author_input)
-            for c in collabs[:20]:
-                G.add_edge(author_input, c["collaborator"], weight=c["shared_papers"])
 
-            net = Network(height="400px", width="100%", bgcolor="#0e1117", font_color="white")
-            net.from_nx(G)
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 5 — TOPIC SEARCH
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Topic Search":
+    st.markdown("<div class='section-title'>Topic Explorer</div>", unsafe_allow_html=True)
 
-            for node in net.nodes:
-                if node["id"] == author_input:
-                    node["color"] = "#FF6B6B"
-                    node["size"]  = 30
-                else:
-                    node["color"] = "#4FC3F7"
-                    node["size"]  = 15
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
-                net.save_graph(f.name)
-                html_content = open(f.name, "r", encoding="utf-8").read()
-
-            st.components.v1.html(html_content, height=420, scrolling=True)
-
-# ─── PAGE 5 : Recherche Topic ────────────────────────────────────────────────
-elif page == "Recherche Topic":
-    st.header("Recherche par Topic")
-
-    topic_input = st.text_input("Topic", placeholder="ex: neural")
+    topic_input = st.text_input("Topic", placeholder="e.g. neural, transformer, federated",
+                                 label_visibility="collapsed")
 
     if topic_input:
-        st.subheader(f"Papers lies a '{topic_input}'")
         papers = get_papers_by_topic(topic_input, limit=20)
         if papers:
+            st.caption(f"{len(papers)} papers found for **{topic_input}**")
             df = pd.DataFrame(papers)
-            st.dataframe(df, use_container_width=True)
 
             col1, col2 = st.columns(2)
-
             with col1:
-                fig = px.scatter(
-                    df,
-                    x="year", y="citations",
-                    hover_data=["title"],
-                    size_max=30,
-                    color="citations",
-                    color_continuous_scale="Viridis",
-                    labels={"year": "Annee", "citations": "Citations"}
-                )
+                st.markdown("**Citations vs Year**")
+                fig = px.scatter(df, x="year", y="citations",
+                                 hover_data=["title"],
+                                 color="citations", color_continuous_scale=PURPLES,
+                                 size="citations", size_max=28)
+                fig.update_layout(**PL, xaxis_title="Year", yaxis_title="Citations", height=300)
                 st.plotly_chart(fig, use_container_width=True)
 
             with col2:
-                fig2 = px.histogram(
-                    df, x="year",
-                    nbins=15,
-                    color_discrete_sequence=["#4FC3F7"],
-                    labels={"year": "Annee", "count": "Nombre de papers"}
-                )
+                st.markdown("**Papers per Year**")
+                fig2 = px.histogram(df, x="year", nbins=12,
+                                    color_discrete_sequence=["#9112BC"])
+                fig2.update_layout(**PL, xaxis_title="Year", yaxis_title="Count", height=300)
                 st.plotly_chart(fig2, use_container_width=True)
+
+            st.markdown("**Papers**")
+            for p in papers:
+                st.markdown(f"""
+                <div class="paper-card">
+                    <div class="paper-title">{p['title'][:120]}</div>
+                    <div>
+                        <span class="paper-badge">{p.get('year','—')}</span>
+                        <span class="paper-badge">{p.get('citations',0) or 0:,} citations</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
         else:
-            st.warning(f"Aucun paper trouve pour '{topic_input}'")
+            st.warning(f"No papers found for '{topic_input}'.")
 
-# ─── PAGE 6 : Communautes de Chercheurs ──────────────────────────────────────
-elif page == "Communautes de Chercheurs":
-    st.header("🧩 Communautes de Chercheurs")
-    st.markdown("Detection de communautes via l'algorithme de **Louvain** sur le reseau de collaborations.")
 
-    # verifier si les communautes sont deja calculees
+# ══════════════════════════════════════════════════════════════════════════════
+# PAGE 6 — COMMUNITIES
+# ══════════════════════════════════════════════════════════════════════════════
+elif page == "Research Communities":
     from bonus.community import get_communities_from_neo4j, get_author_community
+
+    st.markdown("<div class='section-title'>Research Communities — Louvain Detection</div>",
+                unsafe_allow_html=True)
 
     communities_data = get_communities_from_neo4j(limit=50)
 
     if not communities_data:
-        st.warning("Aucune communaute detectee dans Neo4j.")
-        st.info("Lancer d'abord : `python bonus/community.py`")
-        if st.button("Lancer la detection maintenant"):
-            with st.spinner("Detection en cours (peut prendre quelques minutes)..."):
+        st.warning("No communities detected yet. Run: `python bonus/community.py`")
+        if st.button("Run detection now"):
+            with st.spinner("Detecting communities…"):
                 from bonus.community import run_community_detection
                 result = run_community_detection()
                 if result:
-                    st.success(f"{result['n_communities']} communautes detectees !")
+                    st.success(f"{result['n_communities']} communities detected!")
                     st.rerun()
                 else:
-                    st.error("Echec de la detection. Verifier les logs.")
+                    st.error("Detection failed. Check logs.")
     else:
-        # ── Stats globales
         total_authors = sum(c["size"] for c in communities_data)
         n_comm        = len(communities_data)
 
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Communautes detectees", n_comm)
-        col2.metric("Auteurs assignes",      total_authors)
-        col3.metric("Taille moyenne",        f"{total_authors / n_comm:.1f}" if n_comm else "—")
+        cm1, cm2, cm3 = st.columns(3)
+        cm1.metric("Communities",      n_comm)
+        cm2.metric("Authors assigned", f"{total_authors:,}")
+        cm3.metric("Avg size",         f"{total_authors / n_comm:.1f}")
 
-        st.divider()
+        st.markdown("<hr class='sg-divider'>", unsafe_allow_html=True)
 
-        # ── Distribution des tailles
-        col_a, col_b = st.columns(2)
+        col_l, col_r = st.columns([3, 2])
 
-        with col_a:
-            st.subheader("Taille des communautes")
+        with col_l:
+            st.markdown("<div class='section-title'>Community Sizes</div>", unsafe_allow_html=True)
             df_comm = pd.DataFrame(communities_data)
-            df_comm["community_label"] = df_comm["community_id"].apply(lambda x: f"Comm #{x}")
-
-            fig = px.bar(
-                df_comm.head(20),
-                x="size", y="community_label",
-                orientation="h",
-                color="size",
-                color_continuous_scale="Viridis",
-                labels={"size": "Nombre de membres", "community_label": "Communaute"}
-            )
-            fig.update_layout(yaxis=dict(autorange="reversed"), showlegend=False, height=500)
+            df_comm["label"] = df_comm["community_id"].apply(lambda x: f"#{x}")
+            fig = px.bar(df_comm.head(20), x="size", y="label", orientation="h",
+                         color="size", color_continuous_scale=PURPLES)
+            fig.update_layout(**PL, yaxis=dict(autorange="reversed"),
+                              xaxis_title="Members", yaxis_title="", height=460)
+            fig.update_traces(marker_line_width=0)
             st.plotly_chart(fig, use_container_width=True)
 
-        with col_b:
-            st.subheader("Repartition des membres")
-            fig2 = px.pie(
-                df_comm.head(15),
-                names="community_label",
-                values="size",
-                color_discrete_sequence=px.colors.qualitative.Pastel
-            )
-            fig2.update_traces(textposition="inside", textinfo="percent+label")
+        with col_r:
+            st.markdown("<div class='section-title'>Distribution</div>", unsafe_allow_html=True)
+            fig2 = px.pie(df_comm.head(12), names="label", values="size",
+                          color_discrete_sequence=PURPLES + [ACCENT])
+            fig2.update_layout(**PL, height=300)
+            fig2.update_traces(textposition="inside", textinfo="percent+label", textfont_size=9)
             st.plotly_chart(fig2, use_container_width=True)
 
-        # ── Top membres par communaute
-        st.subheader("Top membres par communaute")
-        for comm in communities_data[:10]:
-            members_preview = comm.get("top_members", [])
-            with st.expander(f"Communaute #{comm['community_id']} — {comm['size']} membres"):
-                if members_preview:
-                    st.write(", ".join(members_preview))
-                else:
-                    st.write("Aucun membre disponible")
+            st.markdown("**Top communities**")
+            for comm in communities_data[:8]:
+                members = comm.get("top_members", [])[:3]
+                st.markdown(f"""
+                <div class="paper-card" style="padding:10px 14px;">
+                  <div style="font-size:0.78rem;font-weight:700;color:#9112BC">
+                    Community #{comm['community_id']} &middot; {comm['size']} members
+                  </div>
+                  <div style="font-size:0.74rem;color:#AE75DA;margin-top:3px">
+                    {', '.join(members)}{'...' if len(members) == 3 else ''}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
 
-        # ── Visualisation graphe colore par communaute
-        st.subheader("Reseau colore par communaute")
-        n_collab = st.slider("Collaborations a afficher", 30, 150, 60)
+        # Network coloured by community
+        st.markdown("<hr class='sg-divider'>", unsafe_allow_html=True)
+        st.markdown("<div class='section-title'>Network by Community</div>", unsafe_allow_html=True)
+        n_collab = st.slider("Edges to display", 30, 150, 80)
 
         driver = get_driver()
         query = """
         MATCH (a1:Author)-[r:COLLABORATED_WITH]-(a2:Author)
         WHERE id(a1) < id(a2)
-          AND a1.community_id IS NOT NULL
-          AND a2.community_id IS NOT NULL
+          AND a1.community_id IS NOT NULL AND a2.community_id IS NOT NULL
         RETURN a1.name AS author1, a1.community_id AS comm1,
                a2.name AS author2, a2.community_id AS comm2,
                r.count AS weight
-        ORDER BY r.count DESC
-        LIMIT $limit
+        ORDER BY r.count DESC LIMIT $limit
         """
         with driver.session() as session:
             rows = [dict(r) for r in session.run(query, limit=n_collab)]
         driver.close()
 
         if rows:
-            # palette de couleurs par communaute
-            comm_ids = list(set([r["comm1"] for r in rows] + [r["comm2"] for r in rows]))
-            palette  = px.colors.qualitative.Plotly + px.colors.qualitative.Safe
-            color_map = {cid: palette[i % len(palette)] for i, cid in enumerate(sorted(comm_ids))}
+            comm_ids  = sorted(set([r["comm1"] for r in rows] + [r["comm2"] for r in rows]))
+            palette   = PURPLES + [ACCENT, "#FFFCB8", "#D9AEF0", "#F3E6FA",
+                                   "#FF8080", "#FFD700", "#00BCD4", "#4CAF50"]
+            color_map = {cid: palette[i % len(palette)] for i, cid in enumerate(comm_ids)}
 
             G = nx.Graph()
             node_comm = {}
@@ -440,55 +648,51 @@ elif page == "Communautes de Chercheurs":
                 node_comm[r["author1"]] = r["comm1"]
                 node_comm[r["author2"]] = r["comm2"]
 
-            net = Network(height="600px", width="100%", bgcolor="#0e1117", font_color="white")
-            net.from_nx(G)
+            pos = nx.spring_layout(G, seed=42, k=1.5)
+            edge_x, edge_y = [], []
+            for u, v in G.edges():
+                x0, y0 = pos[u]; x1, y1 = pos[v]
+                edge_x += [x0, x1, None]; edge_y += [y0, y1, None]
 
-            for node in net.nodes:
-                nid    = node["id"]
-                comm   = node_comm.get(nid, 0)
-                degree = G.degree(nid)
-                node["size"]  = 10 + degree * 2
-                node["color"] = color_map.get(comm, "#888888")
-                node["title"] = f"{nid}\nCommunaute #{comm}"
+            fig3 = go.Figure()
+            fig3.add_trace(go.Scatter(x=edge_x, y=edge_y, mode="lines",
+                                      line=dict(width=0.5, color="#D9AEF0"),
+                                      hoverinfo="none"))
+            fig3.add_trace(go.Scatter(
+                x=[pos[n][0] for n in G.nodes()],
+                y=[pos[n][1] for n in G.nodes()],
+                mode="markers+text",
+                marker=dict(
+                    size=[10 + G.degree(n) * 1.8 for n in G.nodes()],
+                    color=[color_map.get(node_comm.get(n, 0), "#AE75DA") for n in G.nodes()],
+                    line=dict(width=1, color="#FFFFFF")
+                ),
+                text=[n[:16] if G.degree(n) > 4 else "" for n in G.nodes()],
+                textposition="top center",
+                textfont=dict(size=7, color="#1A0030"),
+                hovertext=[f"{n} — Community #{node_comm.get(n,'?')}" for n in G.nodes()],
+                hoverinfo="text",
+            ))
+            fig3.update_layout(**PL, height=500, showlegend=False,
+                               xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                               yaxis=dict(showgrid=False, zeroline=False, showticklabels=False))
+            st.plotly_chart(fig3, use_container_width=True)
+            st.caption("Each color represents a distinct research community detected by Louvain.")
 
-            for edge in net.edges:
-                edge["color"] = "#333333"
-                edge["width"] = max(1, edge.get("weight", 1) * 0.5)
-
-            net.set_options("""
-            {
-              "physics": {
-                "forceAtlas2Based": {
-                  "gravitationalConstant": -60,
-                  "centralGravity": 0.01,
-                  "springLength": 120
-                },
-                "solver": "forceAtlas2Based"
-              }
-            }
-            """)
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".html") as f:
-                net.save_graph(f.name)
-                html_content = open(f.name, "r", encoding="utf-8").read()
-
-            st.components.v1.html(html_content, height=620, scrolling=True)
-            st.caption("Chaque couleur represente une communaute distincte detectee par Louvain.")
-        else:
-            st.info("Pas assez de donnees pour la visualisation. "
-                    "Verifier que community_id est bien stocke sur les auteurs.")
-
-        # ── Recherche par auteur
-        st.divider()
-        st.subheader("Trouver la communaute d'un auteur")
-        author_search = st.text_input("Nom de l'auteur", placeholder="ex: LeCun")
-
+        # Author lookup
+        st.markdown("<hr class='sg-divider'>", unsafe_allow_html=True)
+        st.markdown("**Find an author's community**")
+        author_search = st.text_input("Community author search",
+                                       placeholder="e.g. LeCun, Bengio, Schmidhuber",
+                                       label_visibility="collapsed",
+                                       key="comm_author")
         if author_search:
             result = get_author_community(author_search)
             if result:
-                st.success(f"L'auteur appartient a la **Communaute #{result['community_id']}** "
-                           f"({result['community_size']} membres)")
-                st.write("Membres de la communaute (extrait) :")
-                st.write(", ".join(result["members"]))
+                st.success(f"Community #{result['community_id']} — {result['community_size']} members")
+                members_html = "".join(
+                    f'<span class="author-pill">{m}</span>' for m in result["members"]
+                )
+                st.markdown(members_html, unsafe_allow_html=True)
             else:
-                st.warning("Auteur non trouve ou pas encore assigne a une communaute.")
+                st.warning("Author not found or not yet assigned to a community.")
