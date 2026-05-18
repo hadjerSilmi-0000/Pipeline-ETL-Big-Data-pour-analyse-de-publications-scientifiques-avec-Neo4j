@@ -101,21 +101,17 @@ def update_citation_count(session, arxiv_id: str, count: int):
 
 
 def load_cites_relations(session, rows: list):
-    """
-    Cree les relations CITES.
-    row.from et row.to sont des clean IDs (sans version).
-    On cherche les papers dont arxiv_id commence par ce clean_id.
-    """
     query = """
     UNWIND $rows AS row
-    MATCH (p1:Paper) WHERE p1.arxiv_id = row.from
+    MATCH (p1:Paper)
+    WHERE p1.arxiv_id = row.from
        OR p1.arxiv_id STARTS WITH (row.from + 'v')
-    MATCH (p2:Paper) WHERE p2.arxiv_id = row.to
+    MATCH (p2:Paper)
+    WHERE p2.arxiv_id = row.to
        OR p2.arxiv_id STARTS WITH (row.to + 'v')
     MERGE (p1)-[:CITES]->(p2)
     """
     session.run(query, rows=rows)
-
 
 def run(limit: int = None):
     driver  = get_driver()
